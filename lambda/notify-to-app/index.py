@@ -8,6 +8,7 @@ import time
 import traceback
 
 import urllib.request
+import urllib.parse
 
 from typing import Optional
 from botocore.config import Config
@@ -239,7 +240,7 @@ def push_notification(item_list):
             item["detail"] = item["detail"].replace("。\n", "。\r")
             msg = create_teams_message(item)
         else:  # Slack
-            msg = item
+            msg = create_slack_message(item)
 
         encoded_msg = json.dumps(msg).encode("utf-8")
         print("push_msg:{}".format(item))
@@ -251,6 +252,17 @@ def push_notification(item_list):
             print(res.read())
         time.sleep(0.5)
 
+def create_slack_message(item):
+    # URL encode the RSS link separately
+
+    message = {
+        "text": f"{item['rss_time']}\n" \
+                f"<{item['rss_link']}|{item['rss_title']}>\n" \
+                f"{item['summary']}\n" \
+                f"{item['detail']}"
+    }
+
+    return message
 
 def get_new_entries(blog_entries):
     """Determine if there are new blog entries to notify on Slack by checking the eventName

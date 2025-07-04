@@ -17,8 +17,8 @@
         ]
     },
     "context": {
-        "modelRegion": "us-east-1",
-        "modelId": "anthropic.claude-3-sonnet-20240229-v1:0",
+        "modelRegion": "ap-northeast-1",
+        "modelId": "anthropic.claude-3-haiku-20240307-v1:0",
         "summarizers": {
             "AwsSolutionsArchitectEnglish": {
                 "outputLanguage": "English.",
