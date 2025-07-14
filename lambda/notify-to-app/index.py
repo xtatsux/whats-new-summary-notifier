@@ -24,6 +24,38 @@ SUMMARIZERS = json.loads(os.environ["SUMMARIZERS"])
 ssm = boto3.client("ssm")
 
 
+def sanitize_text(text):
+    """Remove unwanted XML tags from text
+    
+    Args:
+        text (str): The text to sanitize
+        
+    Returns:
+        str: The sanitized text
+    """
+    if not text:
+        return ""
+    
+    # プロンプト由来の不要なタグを除去
+    unwanted_tags = [
+        r'<outputFormat>.*?</outputFormat>',
+        r'<summaryRule>.*?</summaryRule>',
+        r'<outputLanguage>.*?</outputLanguage>',
+        r'<instruction>.*?</instruction>',
+        r'<persona>.*?</persona>',
+        r'<input>.*?</input>'
+    ]
+    
+    cleaned_text = text
+    for pattern in unwanted_tags:
+        cleaned_text = re.sub(pattern, '', cleaned_text, flags=re.DOTALL)
+    
+    # 連続する改行を2つまでに制限
+    cleaned_text = re.sub(r'\n{3,}', '\n\n', cleaned_text)
+    
+    return cleaned_text.strip()
+
+
 def get_blog_content(url):
     """Retrieve the content of a blog post
 
@@ -141,61 +173,96 @@ def summarize_blog(
         assumed_role=os.environ.get("BEDROCK_ASSUME_ROLE", None),
         region=MODEL_REGION,
     )
-    beginning_word = "<output>"
-    prompt_data = f"""
-<input>{blog_body}</input>
-<persona>You are a professional {persona}. </persona>
-<instruction>Describe a new update in <input></input> tags in bullet points to describe "What is the new feature", "Who is this update good for". description shall be output in <thinking></thinking> tags and each thinking sentence must start with the bullet point "- " and end with "\n". Make final summary as per <summaryRule></summaryRule> tags. Try to shorten output for easy reading. You are not allowed to utilize any information except in the input. output format shall be in accordance with <outputFormat></outputFormat> tags.</instruction>
-<outputLanguage>In {language}.</outputLanguage>
-<summaryRule>The final summary must consists of 1 or 2 sentences. Output format is defined in <outputFormat></outputFormat> tags.</summaryRule>
-<outputFormat><thinking>(bullet points of the input)</thinking><summary>(final summary)</summary></outputFormat>
-Follow the instruction.
-"""
+    # Converse API向けに最適化されたプロンプト
+    prompt_data = f"""You are a professional {persona} who analyzes technology updates.
+
+Your task is to analyze the provided content and create:
+1. A detailed bullet-point analysis
+2. A concise 1-2 sentence summary
+
+Output Requirements:
+- Language: {language}
+- Format your response EXACTLY as follows:
+<thinking>
+- [Bullet point about what the new feature is]
+- [Bullet point about who this update is good for]
+- [Additional relevant bullet points as needed]
+</thinking>
+<summary>
+[1-2 sentence summary of the update]
+</summary>
+
+Important: Use ONLY the information provided in the input. Do not add external knowledge."""
 
     max_tokens = 4096
-
-    user_message = {
-        "role": "user",
-        "content": [
-            {
-                "type": "text",
-                "text": prompt_data,
-            }
-        ],
-    }
-
-    assistant_message = {
-        "role": "assistant",
-        "content": [{"type": "text", "text": f"{beginning_word}"}],
-    }
-
-    messages = [user_message, assistant_message]
-
-    body = json.dumps(
+    system_prompts = [
         {
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": max_tokens,
-            "messages": messages,
-            "temperature": 0.5,
-            "top_p": 1,
-            "top_k": 250,
+            "text": prompt_data
         }
-    )
+    ]
 
-    accept = "application/json"
-    contentType = "application/json"
-    outputText = "\n"
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "text": f"Please analyze the following content and provide the output in the specified format:\n\n{blog_body}"
+                }
+            ]
+        }
+    ]
+
+    inference_config = {
+        "maxTokens": max_tokens,
+        "temperature": 0.5,
+        "topP": 1,
+    }
+
+    additional_model_request_fields = {
+        "inferenceConfig": {
+            "topK": 125
+        }
+    }
 
     try:
-        response = boto3_bedrock.invoke_model(
-            body=body, modelId=MODEL_ID, accept=accept, contentType=contentType
+        response = boto3_bedrock.converse(
+            system=system_prompts,
+            messages=messages,
+            modelId=MODEL_ID,
+            inferenceConfig=inference_config,
+            additionalModelRequestFields=additional_model_request_fields
         )
-        response_body = json.loads(response.get("body").read().decode())
-        outputText = beginning_word + response_body.get("content")[0]["text"]
-        print(outputText)
-        # extract contant inside <summary> tag
-        summary = re.findall(r"<summary>([\s\S]*?)</summary>", outputText)[0]
-        detail = re.findall(r"<thinking>([\s\S]*?)</thinking>", outputText)[0]
+        outputText = response["output"]["message"]["content"][0]["text"]
+        print(f"=== Bedrock Response ===\n{outputText}\n=== End Response ===")
+        
+        # Log if the response contains unexpected XML tags
+        if "<outputFormat>" in outputText or "<summaryRule>" in outputText:
+            print(f"WARNING: Response contains prompt-related XML tags")
+        
+        # extract content inside <summary> tag with error handling
+        summary_match = re.findall(r"<summary>([\s\S]*?)</summary>", outputText)
+        if summary_match:
+            summary = summary_match[0].strip()
+            print(f"Summary extracted successfully: {len(summary)} chars")
+        else:
+            # If no summary tag found, use sanitized output
+            print("Warning: No <summary> tag found in output")
+            # Sanitize the output to remove unwanted XML tags
+            sanitized = sanitize_text(outputText)
+            summary = sanitized[:200] + "..." if len(sanitized) > 200 else sanitized
+            print(f"Using sanitized output as summary: {len(summary)} chars")
+        
+        # extract content inside <thinking> tag with error handling
+        detail_match = re.findall(r"<thinking>([\s\S]*?)</thinking>", outputText)
+        if detail_match:
+            detail = detail_match[0].strip()
+            print(f"Detail extracted successfully: {len(detail)} chars")
+        else:
+            # If no thinking tag found, don't use the full outputText to avoid XML tags
+            print("Warning: No <thinking> tag found in output")
+            # Use sanitized summary as fallback or empty string
+            detail = ""
+            print("Using empty string for detail to avoid XML tags")
     except ClientError as error:
         if error.response["Error"]["Code"] == "AccessDeniedException":
             print(
@@ -254,12 +321,16 @@ def push_notification(item_list):
 
 def create_slack_message(item):
     # URL encode the RSS link separately
+    
+    # Sanitize summary and detail to ensure no XML tags remain
+    safe_summary = sanitize_text(item['summary'])
+    safe_detail = sanitize_text(item['detail'])
 
     message = {
         "text": f"{item['rss_time']}\n" \
                 f"<{item['rss_link']}|{item['rss_title']}>\n" \
-                f"{item['summary']}\n" \
-                f"{item['detail']}"
+                f"{safe_summary}\n" \
+                f"{safe_detail}"
     }
 
     return message

@@ -16,3 +16,7 @@ __pycache__/
 # virtual env
 venv/
 ENV/
+
+# IDE and Editor files
+.claude/
+.mcp.json
