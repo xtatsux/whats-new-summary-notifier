@@ -37,7 +37,7 @@ export class WhatsNewSummaryNotifierStack extends Stack {
             resources: [`arn:aws:logs:${region}:${accountId}:log-group:*`],
           }),
           new PolicyStatement({
-            actions: ['bedrock:InvokeModel'],
+            actions: ['bedrock:InvokeModel', 'bedrock:Converse'],
             effect: Effect.ALLOW,
             resources: ['*'],
           }),
