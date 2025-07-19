@@ -319,20 +319,181 @@ def push_notification(item_list):
             print(res.read())
         time.sleep(0.5)
 
-def create_slack_message(item):
-    # URL encode the RSS link separately
+def parse_bullet_points(text):
+    """Parse bullet points from text and group them by topic
     
+    Args:
+        text (str): Text containing bullet points starting with '-'
+        
+    Returns:
+        list: List of parsed bullet point groups
+    """
+    if not text:
+        return []
+    
+    lines = text.strip().split('\n')
+    groups = []
+    current_group = None
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        if line.startswith('- '):
+            # Extract the bullet point content
+            content = line[2:].strip()
+            
+            # Check if this is a topic header (contains keywords)
+            topic_keywords = ['新機能', '利用可能', '対象', '詳細', '特徴', 'メリット', '更新', '変更', '追加']
+            is_topic = any(keyword in content for keyword in topic_keywords)
+            
+            if is_topic and ':' in content:
+                # This is a new topic group
+                topic, details = content.split(':', 1)
+                current_group = {
+                    'topic': topic.strip(),
+                    'items': [details.strip()] if details.strip() else []
+                }
+                groups.append(current_group)
+            elif current_group:
+                # Add to current group
+                current_group['items'].append(content)
+            else:
+                # No group yet, create a default one
+                if not groups or groups[-1].get('topic'):
+                    groups.append({'topic': None, 'items': []})
+                groups[-1]['items'].append(content)
+    
+    return groups
+
+
+def create_slack_message(item):
+    """Create a rich Slack message using Block Kit
+    
+    Args:
+        item (dict): Dictionary containing RSS item information
+        
+    Returns:
+        dict: Slack message in Block Kit format
+    """
     # Sanitize summary and detail to ensure no XML tags remain
     safe_summary = sanitize_text(item['summary'])
     safe_detail = sanitize_text(item['detail'])
-
+    
+    # Parse bullet points from detail
+    bullet_groups = parse_bullet_points(safe_detail)
+    
+    # Build blocks
+    blocks = []
+    
+    # Header block
+    blocks.append({
+        "type": "header",
+        "text": {
+            "type": "plain_text",
+            "text": item['rss_title'][:150],  # Slack header limit
+            "emoji": True
+        }
+    })
+    
+    # Context block for date/time
+    blocks.append({
+        "type": "context",
+        "elements": [
+            {
+                "type": "mrkdwn",
+                "text": f"📅 *公開日時:* {item['rss_time']}"
+            }
+        ]
+    })
+    
+    # Summary section
+    if safe_summary:
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"*📝 要約*\n{safe_summary}"
+            }
+        })
+    
+    # Divider
+    blocks.append({"type": "divider"})
+    
+    # Detail sections
+    if bullet_groups:
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "*🔍 詳細分析*"
+            }
+        })
+        
+        # Add bullet point groups
+        for group in bullet_groups:
+            if group['topic']:
+                # Topic header with emoji
+                emoji = "📌"
+                if "利用可能" in group['topic'] or "対象" in group['topic']:
+                    emoji = "✅"
+                elif "新機能" in group['topic'] or "追加" in group['topic']:
+                    emoji = "🚀"
+                elif "変更" in group['topic'] or "更新" in group['topic']:
+                    emoji = "🔄"
+                
+                # Create formatted bullet list
+                bullet_text = f"{emoji} *{group['topic']}*"
+                if group['items']:
+                    bullet_text += "\n" + "\n".join([f"• {item}" for item in group['items']])
+                
+                blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": bullet_text[:3000]  # Slack text limit
+                    }
+                })
+            else:
+                # Items without topic
+                if group['items']:
+                    bullet_text = "\n".join([f"• {item}" for item in group['items']])
+                    blocks.append({
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": bullet_text[:3000]
+                        }
+                    })
+    
+    # Another divider before action
+    blocks.append({"type": "divider"})
+    
+    # Action block
+    blocks.append({
+        "type": "actions",
+        "elements": [
+            {
+                "type": "button",
+                "text": {
+                    "type": "plain_text",
+                    "text": "📖 記事を読む",
+                    "emoji": True
+                },
+                "url": item['rss_link'],
+                "style": "primary"
+            }
+        ]
+    })
+    
+    # Create message with blocks
     message = {
-        "text": f"{item['rss_time']}\n" \
-                f"<{item['rss_link']}|{item['rss_title']}>\n" \
-                f"{safe_summary}\n" \
-                f"{safe_detail}"
+        "blocks": blocks,
+        # Fallback text for notifications
+        "text": f"{item['rss_title']} - {safe_summary[:100]}..."
     }
-
+    
     return message
 
 def get_new_entries(blog_entries):

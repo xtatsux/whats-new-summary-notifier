@@ -6,6 +6,12 @@
   <img src="doc/example_ja.png" alt="example" width="50%" />
 </p>
 
+### 機能
+- **リッチなSlack通知**: Slack Block Kitを使用し、ヘッダー、要約、箇条書き、アクションボタンを含む視覚的に分かりやすい構造化された通知を実現
+- **多言語サポート**: 設定に基づいて複数の言語で要約を生成
+- **インテリジェントなコンテンツ分析**: Amazon Bedrockを使用して記事を詳細な箇条書きで分析・要約
+- **クロスプラットフォーム配信**: SlackとMicrosoft Teamsの両方の通知をサポート
+
 ## アーキテクチャ
 
 ![architecture](doc/architecture.png)
