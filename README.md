@@ -8,6 +8,12 @@
   <img alt="example" src="doc/example_en.png" width="50%" />
 </p>
 
+### Features
+- **Rich Slack Notifications**: Utilizes Slack Block Kit for visually appealing and structured notifications with headers, summaries, bullet points, and action buttons
+- **Multi-language Support**: Generates summaries in multiple languages based on configuration
+- **Intelligent Content Analysis**: Uses Amazon Bedrock to analyze and summarize articles with detailed bullet points
+- **Cross-platform Delivery**: Supports both Slack and Microsoft Teams notifications
+
 ## Architecture
 
 This stack create following architecture.
